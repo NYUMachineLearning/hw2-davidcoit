@@ -1,0 +1,233 @@
+---
+title: "Regression Homework"
+author: "David Coit"
+date: "Fall 2019"
+output:
+  html_document:
+    df_print: paged
+fontsize: 11pt
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, eval = T)
+```
+
+
+```{r message = FALSE}
+library(caret)
+library(MASS)
+library(ggplot2)
+library(dplyr)
+library(ggfortify)
+library(elasticnet)
+
+#Mauna Loa CO2 concentrations
+data(airquality)
+
+```
+
+
+1. Split data into training and test set (75% in train set, 25% in test set)
+
+```{r}
+# set a random seed so results are the same across testing runs
+set.seed(2718)
+# use the createDataPartiion function to create an index
+# for splitting the data set
+train_index = createDataPartition(airquality$Temp, p = .75, 
+                                  list = FALSE, 
+                                  times = 1)
+# split airquality into complementary subsets
+train_regression = airquality[train_index,]
+test_regression = airquality[-train_index,]
+```
+
+
+2. Create and fit a linear model to predict Temperature from Wind using the training set
+
+```{r}
+linear_regression <- train(Temp ~ Wind, data=train_regression, method = "lm")
+summary(linear_regression)
+```
+
+
+3. Vizualize how your model performed on the train data by plotting the regression line on top of the train data points. 
+```{r message = FALSE}
+ggplot() + 
+  geom_point(data = train_regression, 
+             aes(x=Wind, y=Temp)) +
+  geom_smooth(data = train_regression, 
+              aes(x=Wind,y=predict(linear_regression, newdata = train_regression))) +
+  theme_bw() +
+  ggtitle("Temperature as a Linear Function of Wind Predicted Using Caret's 'train()'")
+```
+
+```{r}
+# Use the cor.test() function to test the correlation between
+# test_regression set Wind values and the Wind values predicted by regression
+
+# test correlation between test set Wind values and linear regression applied to test set
+# ie between actual and predicted
+correlation <- cor.test(test_regression$Wind, predict(linear_regression, newdata = test_regression), 
+                    method = "pearson")
+correlation
+
+```
+**The correlation is strong, with a value so close to -1 that R rounds off both the sample estimate and the confidence interval boundaries.**
+
+
+4. Explore how the model performs on the test data. For Linear Regression:
+
+* The residuals should be close to zero.
+* There should be equal variance around the regression line (homoscedasticity).
+* Residuals should be normally distributed.
+* Independent variables and residuals should not be correlated.
+
+4 a) See how the model performs on the test data
+```{r}
+linear_prediction <- predict(linear_regression, newdata=test_regression['Wind'])
+
+ggplot() + 
+  geom_point(data = test_regression, 
+             aes(x=Wind, y=Temp)) +
+  # geom_smooth(data = test_regression, 
+  #             aes(x=Wind,y=predict(linear_regression, newdata = test_regression))) +
+  geom_smooth(data = test_regression, 
+              aes(x=Wind,y=linear_prediction)) +
+  theme_bw() +
+  ggtitle("Appying the Linear Model from Training Set to Test Set")
+#summary(linear_prediction)
+
+```
+
+4 b) Look at the residuals. Are they close to zero?
+```{r}
+#look at the median residual value. Close to zero is best
+linear_prediction <- predict(linear_regression, newdata=train_regression['Wind'])
+res <- c()
+
+summary(residuals(linear_regression))
+hist(residuals(linear_regression))
+```
+
+**The mean of the residuals is exactly 0 and the median is fairly close at 1.65, but when we plot a histogram of the residuals we can see that there are several values with an absolute value greater than 10. Also, the distribution appears to be skewed.**
+
+
+
+4 c) Plot predicted temperature vs observed temperature. A strong model should show a strong correlation
+```{r errore = FALSE, message = FALSE, warning=FALSE}
+ggplot(data = train_regression) + 
+  # Plot scatter of predicted vs. true temperatures
+  geom_point(aes(x=Temp, y=predict(linear_regression, newdata = train_regression))) +
+  # Plot smooth trend line of predicted v. true temp
+  geom_smooth(aes(x=Temp, y=predict(linear_regression, newdata = train_regression), color = 'r')) + 
+  # Plot identity function as reference
+  geom_smooth(aes(x=Temp, y=Temp)) + 
+  theme_bw() +
+  xlim(55,95) +
+  ylim(55,95) +
+  xlab("Actual Temperature") +
+  ylab("Predicted Temperature") +
+  ggtitle("Predicted Temperature vs. Actual Temperature") + 
+  theme(legend.position = 'none')
+
+  cor.test(predict(linear_regression, newdata = test_regression), test_regression$Wind)
+
+```
+**Our correlation is very strong with a value so close to -1 that R rounds off the difference. An extremely low p-value for this estimate of the correlation further indicates that our model is a good one.**
+
+
+
+
+4 d) Visualize the predicted values in relation to the real data points. Look for homoscedasticity
+```{r}
+
+#plot the regression line on the predicted values
+ggplot(data = test_regression) + 
+  geom_point(aes(x=Wind, y=predict(linear_regression, newdata = test_regression), color = 'r', alpha=0.8)) +
+  geom_smooth(aes(x=Wind, y=predict(linear_regression, newdata = test_regression), color='r', alpha=0.8)) +
+  geom_point(aes(x=Wind, y=Temp)) +
+  theme_bw() +
+  ggtitle("Regression Model Applied to Test Data, Against True Temp v. Wind Scatter ")  + 
+  theme(legend.position = "none") + 
+  ylab("Temp")
+
+```
+
+```{r}
+# Create vector of residuals, test Temp - predicted test Temp
+test_residuals = test_regression$Temp - predict(linear_regression, newdata = test_regression)
+
+# Plot density of model residuals from test set
+ggplot() +
+  geom_density(aes(test_residuals)) + 
+  ggtitle("Residuals of Linear Regression on Test Set")
+
+# print stats on residuals
+summary(test_residuals)
+shapiro.test(test_residuals)
+```
+**Similar to the results from the training set, the residuals of the model applied to the test set are not normally distributed - there is significant skew.**
+
+```{r}
+# Test for homoscedasticity, ie are 
+
+cor.test(test_regression$Wind, test_residuals)
+```
+**The estimate of correlation of the true values and the residuals of the model application to the test set is very low, at ~0.05. The high p-value of ~0.8 means we certainly cannot reject the hypothese that the true correlation between the independent variable and the residuals is 0.**
+
+
+4 e) Residuals should be normally distributed. Plot the density of the residuals
+```{r}
+# Looking at residuals from the regression on the training set
+residuals_lin <- residuals(linear_regression)
+
+# Plot density of residuals 
+ggplot() +
+  geom_density(aes(residuals_lin)) + 
+  ggtitle("Residuals of Linear Regression (Training Set")
+
+# Test residuals for normality
+summary(residuals_lin)
+shapiro.test(residuals_lin)
+
+```
+**Althought the residuals density appears to be roughly bell-curve-shaped with a mean value of 0, it is significantly skewed. Performing the SHapiro-Wilk test for normality on the list of residuals produces a p value of 0.1951, indicating we cannot assume a residual distribution of N(0,1).**
+
+
+4 f) Independent variables and residuals should not be correlated
+```{r}
+# Test correlation between Wind values and the residuals of the linear model
+
+cor.test(train_regression$Wind, resid(linear_regression))
+```
+
+**Here the correlation is extremely close to zero, being on the order of 10^-16. The p-value of the test is so close to 1 that R rounds it off, strongly indicating we cannot reject the null hypothesis that the correlation is equal to 0.**
+
+
+### Linear Regression with Regularization
+
+5. Create a linear model using L1 or L2 regularization to predict Temperature from Wind and Month variables. Plot your predicted values and the real Y values on the same plot. 
+
+
+```{r message=F}
+#library(rqPen)
+ridge_linear_regression = train(Temp ~ Wind + Month, data=train_regression, method = "ridge")
+lasso_linear_regression = train(Temp ~ Wind + Month, data=train_regression, method = "lasso")
+
+#linear_regression <- train(Temp ~ Wind, data=train_regression, method = "bridge")
+summary(ridge_linear_regression)
+summary(lasso_linear_regression)
+
+ggplot(data=test_regression) + 
+   geom_point(aes(x=Wind, y=Temp)) +
+   geom_point(aes(x=Wind, y=predict(ridge_linear_regression, newdata = test_regression), color = 'r', alpha=0.5)) + 
+   geom_point(aes(x=Wind, y=predict(lasso_linear_regression, newdata = test_regression), color = 'b', alpha=0.5)) + 
+   theme_bw() +
+   theme(legend.position = "none") +
+   ggtitle("Lasso (blue) and Ridge Regressions (red) vs. True Values (black) \n with Wind and Month as Predictor Variables for Temperature") 
+```
+
+
+
+
